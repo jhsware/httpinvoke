@@ -94,7 +94,29 @@ var protocolImplementations = {
     );
 }/* jshint undef:true */, supportedMethods = ',GET,HEAD,PATCH,POST,PUT,DELETE,', pass = function(value) {
     return value;
-}, _undefined, absoluteURLRegExp = /^[a-z][a-z0-9.+-]*:/i, addHook = function(type, hook) {
+}, _undefined, urlPartitioningRegExp = /^(?:([a-z][a-z0-9.+-]*:)|)(?:\/\/([^\/?#:]*)(?:(:\d+)|)|)/, getOrigin = function(url, protocol) {
+    if(url && (url = urlPartitioningRegExp.exec(url.toLowerCase())) && url[2]) {
+        if(!url[1]) {
+            if(!protocol) {
+                return null;
+            }
+            url[1] = protocol;
+        }
+        if(url[3]) {
+            if(url[1] === 'http:') {
+                if(url[3] === ':80') {
+                    url[3] = '';
+                }
+            } else if(url[1] === 'https:') {
+                if(url[3] === ':443') {
+                    url[3] = '';
+                }
+            }
+        }
+        return url[1] + '//' + url[2] + url[3];
+    }
+    return null;
+}, addHook = function(type, hook) {
     'use strict';
     if(typeof hook !== 'function') {
         throw new Error('TODO error');
@@ -159,11 +181,10 @@ var build = function() {
 var httpinvoke = function(url, method, options, cb) {
     /* jshint unused:true */
     ;/* global httpinvoke, url, method, options, cb */
-/* global nextTick, mixInPromise, pass, progress, reject, resolve, supportedMethods, isArray, isArrayBufferView, isFormData, isByteArray, _undefined, absoluteURLRegExp */
+/* global nextTick, mixInPromise, pass, progress, reject, resolve, supportedMethods, isArray, isArrayBufferView, isFormData, isByteArray, _undefined, absoluteURLRegExp, getOrigin */
 /* global setTimeout */
-/* global crossDomain */// this one is a hack, because when in nodejs this is not really defined, but it is never needed
 /* jshint -W020 */
-var hook, promise, failWithoutRequest, uploadProgressCb, downloadProgressCb, inputLength, inputHeaders, statusCb, outputHeaders, exposedHeaders, status, outputBinary, input, outputLength, outputConverter, protocol, anonymous, system;
+var hook, promise, failWithoutRequest, uploadProgressCb, downloadProgressCb, inputLength, inputHeaders, statusCb, outputHeaders, exposedHeaders, status, outputBinary, input, outputLength, outputConverter, origin, urlOrigin, useCORS, anonymous, system;
 hook = function(type, args) {
     var hooks = httpinvoke._hooks[type];
     for(var i = 0; i < hooks.length; i += 1) {
@@ -172,6 +193,7 @@ hook = function(type, args) {
     return args;
 };
 /*************** COMMON initialize parameters **************/
+origin = httpinvoke.getOrigin();
 var downloadTimeout, uploadTimeout, timeout;
 if(!method) {
     // 1 argument
@@ -345,18 +367,16 @@ try {
 } catch(err) {
     return failWithoutRequest(cb, err);
 }
-if(!httpinvoke.relativeURLs && !absoluteURLRegExp.test(url)) {
+urlOrigin = getOrigin(url, origin && origin.substr(0, origin.indexOf(':'))) || origin;
+if(!urlOrigin) {
     return failWithoutRequest(cb, [26, url]);
-}
-protocol = url.substr(0, url.indexOf(':'));
-if(absoluteURLRegExp.test(url) && protocol !== 'http' && protocol !== 'https') {
-    return failWithoutRequest(cb, [25, protocol]);
 }
 anonymous = typeof options.anonymous === 'undefined' ? httpinvoke.anonymousByDefault : options.anonymous;
 system = typeof options.system === 'undefined' ? httpinvoke.systemByDefault : options.system;
-if(typeof options.system !== 'undefined' && system) {
+if(system) {
     anonymous = true;
 }
+useCORS = (!origin || origin !== urlOrigin) && !system;
 var partialOutputMode = options.partialOutputMode || 'disabled';
 if(partialOutputMode.indexOf(',') >= 0 || ',disabled,chunked,joined,'.indexOf(',' + partialOutputMode + ',') < 0) {
     return failWithoutRequest(cb, [3]);
@@ -434,7 +454,7 @@ if(optionsTimeout !== _undefined) {
     if(typeof optionsTimeout === 'number' && isValidTimeout(optionsTimeout)) {
         timeout = optionsTimeout;
     } else if(isArray(optionsTimeout) && optionsTimeout.length === 2 && isValidTimeout(optionsTimeout[0]) && isValidTimeout(optionsTimeout[1])) {
-        if(httpinvoke.corsFineGrainedTimeouts || !crossDomain) {
+        if(httpinvoke.corsFineGrainedTimeouts || !useCORS) {
             uploadTimeout = optionsTimeout[0];
             downloadTimeout = optionsTimeout[1];
         } else {
@@ -478,8 +498,13 @@ if(timeout) {
         res.on('data', pass);
         res.on('end', pass);
     };
+    var protocol = urlOrigin.substr(0, urlOrigin.indexOf(':'));
+    var req = protocolImplementations[protocol];
+    if(!req) {
+        return failWithoutRequest(cb, [25, protocol, httpinvoke.protocols.join(', ')]);
+    }
     url = parseURL(url);
-    var req = protocolImplementations[protocol].request({
+    req = req.request({
         hostname: url.hostname,
         port: Number(url.port),
         path: url.path,
@@ -668,6 +693,10 @@ httpinvoke.systemByDefault = true;
 httpinvoke.forbiddenInputHeaders = [];
 httpinvoke._hooks = initHooks();
 httpinvoke.hook = addHook;
+httpinvoke.protocols = Object.keys(protocolImplementations);
+httpinvoke.getOrigin = function() {
+    return null;
+};
 
 return httpinvoke;
 };

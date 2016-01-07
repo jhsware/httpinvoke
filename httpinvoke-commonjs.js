@@ -96,7 +96,29 @@ var protocolImplementations = {
     );
 }/* jshint undef:true */, supportedMethods = ',GET,HEAD,PATCH,POST,PUT,DELETE,', pass = function(value) {
     return value;
-}, _undefined, absoluteURLRegExp = /^[a-z][a-z0-9.+-]*:/i, addHook = function(type, hook) {
+}, _undefined, urlPartitioningRegExp = /^(?:([a-z][a-z0-9.+-]*:)|)(?:\/\/([^\/?#:]*)(?:(:\d+)|)|)/, getOrigin = function(url, protocol) {
+    if(url && (url = urlPartitioningRegExp.exec(url.toLowerCase())) && url[2]) {
+        if(!url[1]) {
+            if(!protocol) {
+                return null;
+            }
+            url[1] = protocol;
+        }
+        if(url[3]) {
+            if(url[1] === 'http:') {
+                if(url[3] === ':80') {
+                    url[3] = '';
+                }
+            } else if(url[1] === 'https:') {
+                if(url[3] === ':443') {
+                    url[3] = '';
+                }
+            }
+        }
+        return url[1] + '//' + url[2] + url[3];
+    }
+    return null;
+}, addHook = function(type, hook) {
     'use strict';
     if(typeof hook !== 'function') {
         throw new Error('TODO error');
@@ -161,11 +183,10 @@ var build = function() {
 var httpinvoke = function(url, method, options, cb) {
     /* jshint unused:true */
     ;/* global httpinvoke, url, method, options, cb */
-/* global nextTick, mixInPromise, pass, progress, reject, resolve, supportedMethods, isArray, isArrayBufferView, isFormData, isByteArray, _undefined, absoluteURLRegExp */
+/* global nextTick, mixInPromise, pass, progress, reject, resolve, supportedMethods, isArray, isArrayBufferView, isFormData, isByteArray, _undefined, absoluteURLRegExp, getOrigin */
 /* global setTimeout */
-/* global crossDomain */// this one is a hack, because when in nodejs this is not really defined, but it is never needed
 /* jshint -W020 */
-var hook, promise, failWithoutRequest, uploadProgressCb, downloadProgressCb, inputLength, inputHeaders, statusCb, outputHeaders, exposedHeaders, status, outputBinary, input, outputLength, outputConverter, protocol, anonymous, system;
+var hook, promise, failWithoutRequest, uploadProgressCb, downloadProgressCb, inputLength, inputHeaders, statusCb, outputHeaders, exposedHeaders, status, outputBinary, input, outputLength, outputConverter, origin, urlOrigin, useCORS, anonymous, system;
 hook = function(type, args) {
     var hooks = httpinvoke._hooks[type];
     for(var i = 0; i < hooks.length; i += 1) {
@@ -174,6 +195,7 @@ hook = function(type, args) {
     return args;
 };
 /*************** COMMON initialize parameters **************/
+origin = httpinvoke.getOrigin();
 var downloadTimeout, uploadTimeout, timeout;
 if(!method) {
     // 1 argument
@@ -347,18 +369,16 @@ try {
 } catch(err) {
     return failWithoutRequest(cb, err);
 }
-if(!httpinvoke.relativeURLs && !absoluteURLRegExp.test(url)) {
+urlOrigin = getOrigin(url, origin && origin.substr(0, origin.indexOf(':'))) || origin;
+if(!urlOrigin) {
     return failWithoutRequest(cb, [26, url]);
-}
-protocol = url.substr(0, url.indexOf(':'));
-if(absoluteURLRegExp.test(url) && protocol !== 'http' && protocol !== 'https') {
-    return failWithoutRequest(cb, [25, protocol]);
 }
 anonymous = typeof options.anonymous === 'undefined' ? httpinvoke.anonymousByDefault : options.anonymous;
 system = typeof options.system === 'undefined' ? httpinvoke.systemByDefault : options.system;
-if(typeof options.system !== 'undefined' && system) {
+if(system) {
     anonymous = true;
 }
+useCORS = (!origin || origin !== urlOrigin) && !system;
 var partialOutputMode = options.partialOutputMode || 'disabled';
 if(partialOutputMode.indexOf(',') >= 0 || ',disabled,chunked,joined,'.indexOf(',' + partialOutputMode + ',') < 0) {
     return failWithoutRequest(cb, [3]);
@@ -436,7 +456,7 @@ if(optionsTimeout !== _undefined) {
     if(typeof optionsTimeout === 'number' && isValidTimeout(optionsTimeout)) {
         timeout = optionsTimeout;
     } else if(isArray(optionsTimeout) && optionsTimeout.length === 2 && isValidTimeout(optionsTimeout[0]) && isValidTimeout(optionsTimeout[1])) {
-        if(httpinvoke.corsFineGrainedTimeouts || !crossDomain) {
+        if(httpinvoke.corsFineGrainedTimeouts || !useCORS) {
             uploadTimeout = optionsTimeout[0];
             downloadTimeout = optionsTimeout[1];
         } else {
@@ -480,8 +500,13 @@ if(timeout) {
         res.on('data', pass);
         res.on('end', pass);
     };
+    var protocol = urlOrigin.substr(0, urlOrigin.indexOf(':'));
+    var req = protocolImplementations[protocol];
+    if(!req) {
+        return failWithoutRequest(cb, [25, protocol, httpinvoke.protocols.join(', ')]);
+    }
     url = parseURL(url);
-    var req = protocolImplementations[protocol].request({
+    req = req.request({
         hostname: url.hostname,
         port: Number(url.port),
         path: url.path,
@@ -670,6 +695,10 @@ httpinvoke.systemByDefault = true;
 httpinvoke.forbiddenInputHeaders = [];
 httpinvoke._hooks = initHooks();
 httpinvoke.hook = addHook;
+httpinvoke.protocols = Object.keys(protocolImplementations);
+httpinvoke.getOrigin = function() {
+    return null;
+};
 
 return httpinvoke;
 };
@@ -785,7 +814,29 @@ module.exports = build();
     );
 }/* jshint undef:true */, supportedMethods = ',GET,HEAD,PATCH,POST,PUT,DELETE,', pass = function(value) {
     return value;
-}, _undefined, absoluteURLRegExp = /^[a-z][a-z0-9.+-]*:/i, addHook = function(type, hook) {
+}, _undefined, urlPartitioningRegExp = /^(?:([a-z][a-z0-9.+-]*:)|)(?:\/\/([^\/?#:]*)(?:(:\d+)|)|)/, getOrigin = function(url, protocol) {
+    if(url && (url = urlPartitioningRegExp.exec(url.toLowerCase())) && url[2]) {
+        if(!url[1]) {
+            if(!protocol) {
+                return null;
+            }
+            url[1] = protocol;
+        }
+        if(url[3]) {
+            if(url[1] === 'http:') {
+                if(url[3] === ':80') {
+                    url[3] = '';
+                }
+            } else if(url[1] === 'https:') {
+                if(url[3] === ':443') {
+                    url[3] = '';
+                }
+            }
+        }
+        return url[1] + '//' + url[2] + url[3];
+    }
+    return null;
+}, addHook = function(type, hook) {
     'use strict';
     if(typeof hook !== 'function') {
         throw new Error('TODO error');
@@ -838,8 +889,26 @@ module.exports = build();
         return bytearray;
     };
     var countStringBytes = function(string) {
+        // Characters such as emojis are handled differently by Javascript. They are
+        // called an astral symbol and are respresented by a surrogate pair, ie two chars.
+        // Some references:
+        // https://mathiasbynens.be/notes/javascript-unicode
+        // https://en.wikipedia.org/wiki/Plane_(Unicode)#Basic_Multilingual_Plane
+        // 
+        var justReadEmojiHi;
         for(var c, n = 0, i = string.length;i--;) {
             c = string.charCodeAt(i);
+            if (c >= 56320 && c <= 57343) {
+                justReadEmojiHi = true;
+                continue;
+            } else if (c >= 55296 && c <= 56319) {
+                if (justReadEmojiHi) {
+                    n += 4;
+                }
+                justReadEmojiHi = false;
+                continue;
+            }
+            justReadEmojiHi = false;
             n += c < 128 ? 1 : (c < 2048 ? 2 : 3);
         }
         return n;
@@ -882,27 +951,15 @@ module.exports = build();
         return atLeastOne;
     };
 
-    var urlPartitioningRegExp = /^(?:([a-z][a-z0-9.+-]*:)|)(?:\/\/([^\/?#:]*)(?::(\d+)|)|)/;
-    var isCrossDomain = function(location, url) {
-        if(!absoluteURLRegExp.test(url) && url.substr(0, 2) !== '//') {
-            return false;
-        }
-        url = urlPartitioningRegExp.exec(url.toLowerCase());
-        location = urlPartitioningRegExp.exec(location.toLowerCase()) || [];
-        var locationPort = location[3] || (location[1] === 'http:' ? '80' : '443');
-        return !!((url[1] && url[1] !== location[1]) || url[2] !== location[2] || (url[3] || (url[1] ? (url[1] === 'http:' ? '80' : '443') : locationPort)) !== locationPort);
-    };
-
 var build = function() {
     var createXHR;
     var httpinvoke = function(url, method, options, cb) {
         /* jshint unused:true */
         ;/* global httpinvoke, url, method, options, cb */
-/* global nextTick, mixInPromise, pass, progress, reject, resolve, supportedMethods, isArray, isArrayBufferView, isFormData, isByteArray, _undefined, absoluteURLRegExp */
+/* global nextTick, mixInPromise, pass, progress, reject, resolve, supportedMethods, isArray, isArrayBufferView, isFormData, isByteArray, _undefined, absoluteURLRegExp, getOrigin */
 /* global setTimeout */
-/* global crossDomain */// this one is a hack, because when in nodejs this is not really defined, but it is never needed
 /* jshint -W020 */
-var hook, promise, failWithoutRequest, uploadProgressCb, downloadProgressCb, inputLength, inputHeaders, statusCb, outputHeaders, exposedHeaders, status, outputBinary, input, outputLength, outputConverter, protocol, anonymous, system;
+var hook, promise, failWithoutRequest, uploadProgressCb, downloadProgressCb, inputLength, inputHeaders, statusCb, outputHeaders, exposedHeaders, status, outputBinary, input, outputLength, outputConverter, origin, urlOrigin, useCORS, anonymous, system;
 hook = function(type, args) {
     var hooks = httpinvoke._hooks[type];
     for(var i = 0; i < hooks.length; i += 1) {
@@ -911,6 +968,7 @@ hook = function(type, args) {
     return args;
 };
 /*************** COMMON initialize parameters **************/
+origin = httpinvoke.getOrigin();
 var downloadTimeout, uploadTimeout, timeout;
 if(!method) {
     // 1 argument
@@ -1084,18 +1142,16 @@ try {
 } catch(err) {
     return failWithoutRequest(cb, err);
 }
-if(!httpinvoke.relativeURLs && !absoluteURLRegExp.test(url)) {
+urlOrigin = getOrigin(url, origin && origin.substr(0, origin.indexOf(':'))) || origin;
+if(!urlOrigin) {
     return failWithoutRequest(cb, [26, url]);
-}
-protocol = url.substr(0, url.indexOf(':'));
-if(absoluteURLRegExp.test(url) && protocol !== 'http' && protocol !== 'https') {
-    return failWithoutRequest(cb, [25, protocol]);
 }
 anonymous = typeof options.anonymous === 'undefined' ? httpinvoke.anonymousByDefault : options.anonymous;
 system = typeof options.system === 'undefined' ? httpinvoke.systemByDefault : options.system;
-if(typeof options.system !== 'undefined' && system) {
+if(system) {
     anonymous = true;
 }
+useCORS = (!origin || origin !== urlOrigin) && !system;
 var partialOutputMode = options.partialOutputMode || 'disabled';
 if(partialOutputMode.indexOf(',') >= 0 || ',disabled,chunked,joined,'.indexOf(',' + partialOutputMode + ',') < 0) {
     return failWithoutRequest(cb, [3]);
@@ -1173,7 +1229,7 @@ if(optionsTimeout !== _undefined) {
     if(typeof optionsTimeout === 'number' && isValidTimeout(optionsTimeout)) {
         timeout = optionsTimeout;
     } else if(isArray(optionsTimeout) && optionsTimeout.length === 2 && isValidTimeout(optionsTimeout[0]) && isValidTimeout(optionsTimeout[1])) {
-        if(httpinvoke.corsFineGrainedTimeouts || !crossDomain) {
+        if(httpinvoke.corsFineGrainedTimeouts || !useCORS) {
             uploadTimeout = optionsTimeout[0];
             downloadTimeout = optionsTimeout[1];
         } else {
@@ -1203,7 +1259,7 @@ if(timeout) {
 ;
         /* jshint unused:false */
         /*************** initialize helper variables **************/
-        var xhr, i, j, currentLocation, crossDomain, output,
+        var xhr, i, j, output,
             uploadProgressCbCalled = false,
             partialPosition = 0,
             partialBuffer = partialOutputMode === 'disabled' ? _undefined : (outputBinary ? [] : ''),
@@ -1236,27 +1292,15 @@ if(timeout) {
                 uploadProgressCb = null;
             }
         };
-        try {
-            // IE may throw an exception when accessing
-            // a field from location if document.domain has been set
-            currentLocation = location.href;
-        } catch(_) {
-            // Use the href attribute of an A element
-            // since IE will modify it given document.location
-            currentLocation = document.createElement('a');
-            currentLocation.href = '';
-            currentLocation = currentLocation.href;
-        }
-        crossDomain = isCrossDomain(currentLocation, url);
         /*************** start XHR **************/
         if(typeof input === 'object' && !isFormData(input) && httpinvoke.requestTextOnly) {
             return failWithoutRequest(cb, [17]);
         }
-        if(crossDomain && !httpinvoke.cors) {
+        if(useCORS && !httpinvoke.cors) {
             return failWithoutRequest(cb, [18]);
         }
         for(j = ['DELETE', 'PATCH', 'PUT', 'HEAD'], i = j.length;i-- > 0;) {
-            if(crossDomain && method === j[i] && !httpinvoke['cors' + j[i]]) {
+            if(useCORS && method === j[i] && !httpinvoke['cors' + j[i]]) {
                 return failWithoutRequest(cb, [19, method]);
             }
         }
@@ -1266,7 +1310,7 @@ if(timeout) {
         if(!createXHR) {
             return failWithoutRequest(cb, [21]);
         }
-        xhr = createXHR(crossDomain, {
+        xhr = createXHR(useCORS, {
             mozAnon: anonymous,
             mozSystem: system
         });
@@ -1275,20 +1319,20 @@ if(timeout) {
         } catch(e) {
             return failWithoutRequest(cb, [22, url]);
         }
-        if(httpinvoke.corsCredentials) {
-            if((typeof options.anonymous !== 'undefined' && !anonymous) || (options.corsCredentials && typeof xhr.withCredentials === 'boolean')) {
-                xhr.withCredentials = true;
+        if(useCORS) {
+            if(httpinvoke.corsCredentials) {
+                xhr.withCredentials = !anonymous;
             }
-        }
-        if(crossDomain && options.corsOriginHeader) {
-            // on some Android devices CORS implementations are buggy
-            // that is why there needs to be two workarounds:
-            // 1. custom header with origin has to be passed, because they do not send Origin header on the actual request
-            // 2. caching must be avoided, because of unknown reasons
-            // read more: http://www.kinvey.com/blog/107/how-to-build-a-service-that-supports-every-android-browser
+            if(options.corsOriginHeader && origin) {
+                // on some Android devices CORS implementations are buggy
+                // that is why there needs to be two workarounds:
+                // 1. custom header with origin has to be passed, because they do not send Origin header on the actual request
+                // 2. caching must be avoided, because of unknown reasons
+                // read more: http://www.kinvey.com/blog/107/how-to-build-a-service-that-supports-every-android-browser
 
-            // workaraound for #1: sending origin in custom header, also see the server-side part of the workaround in dummyserver.js
-            inputHeaders[options.corsOriginHeader] = location.protocol + '//' + location.host;
+                // workaraound for #1: sending origin in custom header, also see the server-side part of the workaround in dummyserver.js
+                inputHeaders[options.corsOriginHeader] = origin;
+            }
         }
 
         /*************** bind XHR event listeners **************/
@@ -1456,12 +1500,12 @@ if(timeout) {
                 } catch(err) {
                 }
 
-                mustBeIdentity = outputHeaders['content-encoding'] === 'identity' || (!crossDomain && !outputHeaders['content-encoding']);
+                mustBeIdentity = outputHeaders['content-encoding'] === 'identity' || (!useCORS && !outputHeaders['content-encoding']);
                 if(mustBeIdentity && 'content-length' in outputHeaders) {
                     outputLength = Number(outputHeaders['content-length']);
                 }
 
-                if(!status && (!crossDomain || httpinvoke.corsStatus)) {
+                if(!status && (!useCORS || httpinvoke.corsStatus)) {
                     // Sometimes on IE 9 accessing .status throws an error, but .statusText does not.
                     try {
                         if(xhr.status) {
@@ -1643,7 +1687,7 @@ if(timeout) {
         }
 
         /*************** set XHR request headers **************/
-        if(!crossDomain || httpinvoke.corsRequestHeaders) {
+        if(!useCORS || httpinvoke.corsRequestHeaders) {
             for(var inputHeaderName in inputHeaders) {
                 if(inputHeaders.hasOwnProperty(inputHeaderName)) {
                     try {
@@ -1944,6 +1988,20 @@ if(timeout) {
     httpinvoke.systemByDefault = false;
     // http://www.w3.org/TR/XMLHttpRequest/#the-setrequestheader()-method
     httpinvoke.forbiddenInputHeaders = ['proxy-*', 'sec-*', 'accept-charset', 'accept-encoding', 'access-control-request-headers', 'access-control-request-method', 'connection', 'content-length', 'content-transfer-encoding', 'cookie', 'cookie2', 'date', 'dnt', 'expect', 'host', 'keep-alive', 'origin', 'referer', 'te', 'trailer', 'transfer-encoding', 'upgrade', 'user-agent', 'via'];
+    httpinvoke.protocols = [];
+    httpinvoke.getOrigin = function() {
+        try {
+            // IE may throw an exception when accessing
+            // a field from location if document.domain has been set
+            return getOrigin(window.location.href);
+        } catch(_) {
+            // Use the href attribute of an A element
+            // since IE will modify it given document.location
+            var origin = window.document.createElement('a');
+            origin.href = '';
+            return getOrigin(origin.href);
+        }
+    };
 
     return httpinvoke;
 };
