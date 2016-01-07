@@ -37,8 +37,26 @@
         return bytearray;
     };
     var countStringBytes = function(string) {
+        // Characters such as emojis are handled differently by Javascript. They are
+        // called an astral symbol and are respresented by a surrogate pair, ie two chars.
+        // Some references:
+        // https://mathiasbynens.be/notes/javascript-unicode
+        // https://en.wikipedia.org/wiki/Plane_(Unicode)#Basic_Multilingual_Plane
+        // 
+        var justReadEmojiHi;
         for(var c, n = 0, i = string.length;i--;) {
             c = string.charCodeAt(i);
+            if (c >= 56320 && c <= 57343) {
+                justReadEmojiHi = true;
+                continue;
+            } else if (c >= 55296 && c <= 56319) {
+                if (justReadEmojiHi) {
+                    n += 4;
+                }
+                justReadEmojiHi = false;
+                continue;
+            }
+            justReadEmojiHi = false;
             n += c < 128 ? 1 : (c < 2048 ? 2 : 3);
         }
         return n;
